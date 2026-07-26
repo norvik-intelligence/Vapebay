@@ -349,7 +349,15 @@ Login/Logout) und die Schreibpfade — Margen-Regel und pSEO-Prompt überleben
 einen Reload, eine per API angelegte Bestellung erscheint in der
 Dropshipping-Queue.
 
-Zwei Erkenntnisse aus dem Einrichten der Suite, beide im Code gelandet:
+Drei Fehler, die erst durch Tests bzw. CI aufgefallen sind:
+
+- **Der komplette Katalog-Layer fehlte im Repository.** `.gitignore` enthielt
+  `data/` ohne führenden Slash — ein solches Muster matcht jedes Verzeichnis
+  dieses Namens in beliebiger Tiefe, also auch `src/lib/data/`. Lokal war davon
+  nichts zu sehen; das Repository war nicht baubar. Aufgefallen beim ersten
+  CI-Lauf als Kaskade von TS7006-Fehlern.
+
+Zwei weitere aus dem Einrichten der E2E-Suite, beide im Code gelandet:
 
 - Der Age Gate lag als modaler Dialog auch über `/admin/login` und versteckte
   das Login-Formular aus dem Accessibility-Tree — der Betreiber hätte sich auf
