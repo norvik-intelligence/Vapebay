@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 
 import { isAdminConfigured } from '@/lib/admin/auth';
+import { deploymentEnv } from '@/lib/env';
 import { LoginForm } from '@/components/admin/login-form';
 
 export const metadata: Metadata = {
@@ -23,8 +24,16 @@ export default async function AdminLoginPage({
   const target = next && next.startsWith('/') && !next.startsWith('//') ? next : '/admin';
 
   return (
-    <div className="mx-auto flex min-h-[70dvh] w-full max-w-sm flex-col justify-center">
-      <LoginForm next={target} configured={isAdminConfigured()} />
+    <div className="mx-auto flex min-h-[70dvh] w-full max-w-md flex-col justify-center">
+      <LoginForm
+        next={target}
+        configured={isAdminConfigured()}
+        // Auf Vercel führt der Weg über das Dashboard, nicht über eine .env —
+        // die Anleitung muss zum Deployment passen, sonst sucht jemand nach
+        // einer Datei, die es dort nicht gibt.
+        onVercel={Boolean(process.env.VERCEL)}
+        env={deploymentEnv()}
+      />
     </div>
   );
 }

@@ -3,7 +3,13 @@ import { STOCK_COPY, stockLevel } from '@/lib/utils';
 
 export const SITE = {
   name: 'Vapebay',
-  url: process.env.NEXT_PUBLIC_SITE_URL ?? 'https://vapebay.de',
+  // Priority: explicit config → the Vercel deployment's own URL (so preview
+  // canonicals and the sitemap point at the preview, not at production) →
+  // production default. VERCEL_URL is only set server-side, which is where
+  // all consumers of this value live.
+  url:
+    process.env.NEXT_PUBLIC_SITE_URL ??
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://vapebay.de'),
   legalName: 'Vapebay Handels GmbH',
   description:
     'Pod-Systeme, NicSalts und Einweg-Vapes mit garantierter Kompatibilität. Versand am selben Tag, TPD2-konform, Altersverifikation inklusive.',

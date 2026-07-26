@@ -20,6 +20,8 @@ und SEO-Seiten sich nie widersprechen können.
 - [pSEO-Engine](#pseo-engine)
 - [Admin-Dashboard](#admin-dashboard)
 - [Tests](#tests)
+- [CI auf GitHub](#ci-auf-github)
+- [Deployment auf Vercel (Preview)](#deployment-auf-vercel-preview)
 - [Deployment auf Hetzner CX23](#deployment-auf-hetzner-cx23)
 - [Speicherbudget](#speicherbudget)
 - [Skalierung](#skalierung)
@@ -31,14 +33,13 @@ und SEO-Seiten sich nie widersprechen können.
 
 ```bash
 npm install
-
-# Datenbank anlegen und mit dem Katalog befüllen
-mkdir -p data
-npm run db:push
-npm run db:seed
-
 npm run dev          # http://localhost:3000
 ```
+
+Die Datenbank legt sich beim ersten Zugriff selbst an: fehlt sie, spielt der
+Server das Schema aus `drizzle/` ein und befüllt es aus dem Katalog. Das ist
+derselbe Pfad, den ein Vercel-Kaltstart und ein frisches Docker-Volume
+durchlaufen — kein Sonderweg für die Entwicklung.
 
 Für `/admin` werden zwei Werte gebraucht — ohne sie bleibt das Panel gesperrt,
 und das ist beabsichtigt:
@@ -59,11 +60,12 @@ Weitere Befehle:
 ```bash
 npm run build        # Produktionsbuild, generiert 269 statische Seiten
 npm run typecheck    # tsc --noEmit
-npm run test         # Vitest, 101 Tests
+npm run test         # Vitest, 112 Tests
 npm run test:coverage
 npm run test:e2e     # Playwright, 15 Flows (erst `npm run build` ausführen)
 npm run db:studio    # Drizzle Studio
-npm run db:reset     # DB löschen, neu anlegen, neu seeden
+npm run db:seed      # Katalogstand auffrischen (Preise, Bestände, Templates)
+npm run db:reset     # DB löschen und neu aufbauen
 ```
 
 Wichtige Routen im Dev-Betrieb:
@@ -302,8 +304,8 @@ verwenden, kein selbst ausgedachtes.
 
 ## Tests
 
-101 Tests über Vitest, alles reine Funktionen — kein DOM, Laufzeit unter einer
-Sekunde.
+112 Tests über Vitest, alles reine Funktionen — kein DOM, Laufzeit unter zwei
+Sekunden.
 
 | Datei | Deckt ab |
 |---|---|
@@ -314,6 +316,8 @@ Sekunde.
 | `lib/recommend.test.ts` | Taste-Finder-Scoring, Bestandsfilter, Payload-Sicherheit |
 | `lib/admin/pricing.test.ts` | Charm-Pricing, Preisuntergrenze, Aufschlag ≠ Marge |
 | `lib/admin/auth.test.ts` | Signaturprüfung, Ablauf, Fail-closed ohne Secret |
+| `lib/db/bootstrap.test.ts` | Kaltstart: Schema + Seed aus dem Nichts, Idempotenz |
+| `lib/env.test.ts` | Indexierbarkeit je Deployment-Umgebung |
 
 Drei davon sind Regressionsgurte für Bugs, die beim Bauen tatsächlich
 aufgetreten sind:
@@ -355,6 +359,105 @@ Zwei Erkenntnisse aus dem Einrichten der Suite, beide im Code gelandet:
   das Layout; ein Klick im selben Moment landet auf den alten Koordinaten.
   Der Test blurt deshalb explizit und wartet die Meldung ab — und prüft damit
   nebenbei beide Abwehrschichten einzeln.
+
+---
+
+## CI auf GitHub
+
+`.github/workflows/ci.yml` läuft bei jedem Push und jedem Pull Request:
+
+1. **Schema-Drift-Guard** — `drizzle-kit generate` und prüfen, ob `drizzle/`
+   sich ändert. Der Runtime-Bootstrap liest `drizzle/0000_init.sql`; ein
+   Schema, das ohne Neugenerierung geändert wurde, fällt sonst erst beim
+   Kaltstart einer laufenden Preview auf.
+2. **Typecheck** — `tsc --noEmit`
+3. **Unit-Tests** — 112 Vitest-Tests
+4. **Produktionsbuild** — 269 Seiten
+5. **E2E** — 15 Playwright-Flows gegen genau diesen Build
+
+Bei einem Fehlschlag werden `test-results/` und `playwright-report/` als
+Artefakt hochgeladen (7 Tage), inklusive Traces zum Nachspielen.
+
+Ein neuer Push auf denselben Branch bricht den laufenden Job ab
+(`cancel-in-progress`) — CI-Minuten für einen überholten Stand helfen niemandem.
+
+---
+
+## Deployment auf Vercel (Preview)
+
+Repo in Vercel importieren, fertig — `vercel.json` setzt Framework, Region
+(`fra1`) und Security-Header. Es gibt zwei Dinge zu wissen.
+
+### Die Datenbank ist auf Vercel flüchtig
+
+Serverless hat kein beschreibbares Projektverzeichnis. Die SQLite-Datei landet
+deshalb in `/tmp` der jeweiligen Lambda-Instanz und wird beim ersten Zugriff
+automatisch angelegt und befüllt.
+
+Konsequenz, die man kennen muss: **Bestellungen und gespeicherte Admin-Regeln
+überleben den nächsten Kaltstart nicht.** Für eine Preview ist das genau
+richtig — jeder Aufruf startet von einem sauberen, identischen Demo-Stand. Für
+echten Betrieb ist es das nicht; dafür ist die Docker-Variante unten gedacht
+oder ein Wechsel auf Postgres (siehe [Skalierung](#skalierung)).
+
+Der Preview-Banner oben auf jeder Seite sagt das den Besuchern auch, sonst
+wirkt eine verschwundene Bestellung wie ein Fehler.
+
+### Previews werden nicht indexiert
+
+Jede Preview läuft auf einer eigenen Domain mit identischem Inhalt. Indexiert
+wäre sie Duplicate Content gegen die eigene Produktionsseite — bei 269
+generierten Landingpages kein Randfall. Deshalb liefert ein Deployment mit
+`VERCEL_ENV=preview`:
+
+| Signal | Preview | Produktion |
+|---|---|---|
+| `robots.txt` | `Disallow: /` | normal, mit Sitemap |
+| `<meta name="robots">` | `noindex, nofollow` | `index, follow` |
+| Canonical & Sitemap | zeigen auf die Preview-URL | auf `NEXT_PUBLIC_SITE_URL` |
+| Preview-Banner | sichtbar | aus |
+
+`robots.txt` wird bewusst pro Request ausgewertet statt zur Buildzeit
+eingebacken: das Meta-Tag hängt zwangsläufig daran, dass `VERCEL_ENV` schon
+beim Build gesetzt ist (auf Vercel ist es das), die wichtigste Sperre soll
+davon unabhängig sein.
+
+### Umgebungsvariablen
+
+Der Shop läuft **ohne jede Konfiguration** vollständig. Gesperrt ist nur
+`/admin`, bis diese zwei Werte gesetzt sind (Vercel → Settings → Environment
+Variables, Scope *Preview* und/oder *Production*):
+
+| Variable | Wert |
+|---|---|
+| `ADMIN_SESSION_SECRET` | `openssl rand -hex 32` |
+| `ADMIN_PASSWORD` | SHA-256-Hex des Passworts, **nicht** das Passwort |
+
+```bash
+node -e "crypto.subtle.digest('SHA-256', new TextEncoder()\
+  .encode('deinPasswort')).then(h => console.log(\
+  Buffer.from(h).toString('hex')))"
+```
+
+Optional: `NEXT_PUBLIC_SITE_URL` in der Produktion auf die echte Domain setzen.
+Ohne den Wert nutzt die Anwendung `VERCEL_URL`, was für Previews genau richtig
+und für die Produktion falsch wäre.
+
+Fehlen die Admin-Werte, erklärt die Login-Seite selbst, was zu tun ist — und
+merkt, ob sie auf Vercel oder lokal läuft.
+
+### Preview statt Production
+
+Vercel behandelt Deployments des **Default-Branch** als Production, alles
+andere als Preview. Aktuell ist der Arbeitsbranch der Default-Branch — Pushes
+darauf würden also als Production deployt. Für echte Previews eine der beiden
+Varianten:
+
+- **`main` als Default-Branch anlegen** (empfohlen). Feature-Branches und Pull
+  Requests bekommen dann automatisch Preview-Deployments mit eigener URL pro
+  Commit.
+- **Production Branch in Vercel auf `main` setzen**, ohne dass er existiert
+  (Settings → Git). Dann wird jeder tatsächliche Push zur Preview.
 
 ---
 
@@ -519,6 +622,8 @@ muss:
 - **Preise werden beim Speichern einer Regel nicht neu abgeleitet.** Die Regel
   landet in der Datenbank; die Neuberechnung des Katalogs müsste an den
   Sync-Lauf gehängt werden.
+- **Auf Vercel ist die Datenbank flüchtig.** Bewusst so für Previews; für
+  echten Betrieb Docker oder Postgres, siehe oben.
 - **Ein einziger Admin-Account.** Bewusst so: eine Benutzertabelle für einen
   Ein-Personen-Betrieb ist Maschinerie ohne Aufgabe. Beim zweiten Betreiber
   gehört das durch echte Sessions ersetzt, nicht durch ein zweites Secret.

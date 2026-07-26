@@ -7,8 +7,10 @@ import { Providers } from '@/components/providers';
 import { SiteHeader } from '@/components/site/site-header';
 import { SiteFooter } from '@/components/site/site-footer';
 import { AgeGate } from '@/components/site/age-gate';
+import { PreviewBanner } from '@/components/site/preview-banner';
 import { CartDrawer } from '@/components/commerce/cart-drawer';
 import { SITE, jsonLdScript, organizationLd } from '@/lib/seo/jsonld';
+import { isIndexable, isPreview } from '@/lib/env';
 
 const sans = Inter({
   subsets: ['latin'],
@@ -53,11 +55,16 @@ export const metadata: Metadata = {
     description: SITE.description,
   },
   twitter: { card: 'summary_large_image' },
-  robots: {
-    index: true,
-    follow: true,
-    googleBot: { index: true, follow: true, 'max-image-preview': 'large', 'max-snippet': -1 },
-  },
+  // Preview-Deployments tragen zusätzlich ein Meta-Robots-noindex, nicht nur
+  // das robots.txt-Disallow: eine Preview-URL, die jemand direkt verlinkt,
+  // kann trotz Disallow im Index landen — nur noindex verhindert das.
+  robots: isIndexable()
+    ? {
+        index: true,
+        follow: true,
+        googleBot: { index: true, follow: true, 'max-image-preview': 'large', 'max-snippet': -1 },
+      }
+    : { index: false, follow: false, nocache: true },
   alternates: { canonical: '/' },
   // Legally required signal for age-restricted retail in DE.
   other: { rating: 'adult' },
@@ -88,6 +95,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           >
             Zum Inhalt springen
           </a>
+          {isPreview() && <PreviewBanner />}
           <SiteHeader />
           <main id="main" className="min-h-[60dvh]">
             {children}
