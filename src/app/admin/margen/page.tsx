@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
 import { Info } from 'lucide-react';
 
-import { MARKUP_RULE_SET, marginTable } from '@/lib/admin/pricing';
+import { marginTable } from '@/lib/admin/pricing';
+import { loadMarkupRules } from '@/lib/db/markup';
 import { PRODUCTS } from '@/lib/data/catalog';
 import { formatEur } from '@/lib/utils';
 import { AdminHeader, Panel, StatTile, TableWrap } from '@/components/admin/primitives';
@@ -9,7 +10,12 @@ import { MarkupSimulator } from '@/components/admin/markup-simulator';
 
 export const metadata: Metadata = { title: 'Margen & Aufschlag' };
 
+// Rules come from the DB when present, so a saved change is visible here
+// immediately even though the catalog itself reprices on the next sync.
+export const dynamic = 'force-dynamic';
+
 export default function MarginsPage() {
+  const rules = loadMarkupRules();
   const rows = marginTable();
 
   const catalogRevenue = PRODUCTS.reduce((sum, p) => sum + p.priceCents, 0);
@@ -31,7 +37,7 @@ export default function MarginsPage() {
           sub="über das gesamte Sortiment"
           tone="accent"
         />
-        <StatTile label="Aktive Regeln" value={String(MARKUP_RULE_SET.filter((r) => r.active).length)} sub={`von ${MARKUP_RULE_SET.length}`} />
+        <StatTile label="Aktive Regeln" value={String(rules.filter((r) => r.active).length)} sub={`von ${rules.length}`} />
         <StatTile label="Beste Warengruppe" value={bestKind.label.split(' ')[0]} sub={`${bestKind.grossMarginPct.toFixed(0)} % Marge`} />
         <StatTile label="Kalkulierte Artikel" value={String(PRODUCTS.length)} sub="automatisch bepreist" />
       </div>
@@ -101,13 +107,13 @@ export default function MarginsPage() {
           passiert — bevor die Regel scharf geschaltet wird.
         </p>
         <div className="mt-5">
-          <MarkupSimulator rules={MARKUP_RULE_SET} />
+          <MarkupSimulator rules={rules} />
         </div>
       </section>
 
       <Panel title="Begründungen" description="Warum die Aufschläge so gesetzt sind." className="mt-8">
         <ul className="divide-y divide-line">
-          {MARKUP_RULE_SET.map((rule) => (
+          {rules.map((rule) => (
             <li key={rule.kind} className="px-5 py-4">
               <div className="flex flex-wrap items-baseline gap-3">
                 <h3 className="text-sm font-medium">{rule.label}</h3>

@@ -7,7 +7,7 @@ TypeScript, Drizzle ORM auf SQLite, ausgelegt auf einen €10-Hetzner-VPS mit
 Der inhaltliche Kern ist die **Kompatibilitäts-Engine**: jedes Gerät, jeder Pod
 und jedes Liquid trägt die Metadaten, aus denen sich ableiten lässt, was
 tatsächlich zusammenpasst. Daraus entstehen sowohl der interaktive Finder als
-auch 265 statisch generierte Landingpages — aus derselben Funktion, damit Shop
+auch 269 statisch generierte Landingpages — aus derselben Funktion, damit Shop
 und SEO-Seiten sich nie widersprechen können.
 
 ---
@@ -19,6 +19,7 @@ und SEO-Seiten sich nie widersprechen können.
 - [Features](#features)
 - [pSEO-Engine](#pseo-engine)
 - [Admin-Dashboard](#admin-dashboard)
+- [Tests](#tests)
 - [Deployment auf Hetzner CX23](#deployment-auf-hetzner-cx23)
 - [Speicherbudget](#speicherbudget)
 - [Skalierung](#skalierung)
@@ -39,11 +40,27 @@ npm run db:seed
 npm run dev          # http://localhost:3000
 ```
 
+Für `/admin` werden zwei Werte gebraucht — ohne sie bleibt das Panel gesperrt,
+und das ist beabsichtigt:
+
+```bash
+# Session-Secret
+openssl rand -hex 32
+
+# Passwort-Hash (SHA-256, hex — nicht das Klartextpasswort)
+node -e "crypto.subtle.digest('SHA-256',new TextEncoder()\
+  .encode('deinPasswort')).then(h=>console.log(Buffer.from(h).toString('hex')))"
+```
+
+Beides in `.env` als `ADMIN_SESSION_SECRET` und `ADMIN_PASSWORD` eintragen.
+
 Weitere Befehle:
 
 ```bash
-npm run build        # Produktionsbuild, generiert 265 statische Seiten
+npm run build        # Produktionsbuild, generiert 269 statische Seiten
 npm run typecheck    # tsc --noEmit
+npm run test         # Vitest, 101 Tests
+npm run test:coverage
 npm run db:studio    # Drizzle Studio
 npm run db:reset     # DB löschen, neu anlegen, neu seeden
 ```
@@ -58,7 +75,7 @@ Wichtige Routen im Dev-Betrieb:
 | `/marken/randm/einweg-vapes` | pSEO Marke × Kategorie |
 | `/bundle` | Bundle Builder |
 | `/checkout` | Kasse mit Altersverifikation |
-| `/admin` | Verwaltung (ungeschützt im Dev, Basic-Auth in Prod) |
+| `/admin` | Verwaltung (Login-gesperrt, siehe unten) |
 
 ---
 
@@ -78,7 +95,9 @@ src/
 │  ├─ bundle/  checkout/  b2b/
 │  ├─ admin/                                6 Verwaltungsansichten
 │  ├─ api/                                  compat, taste-finder, products,
-│  │                                        orders, age-verification, admin/sync, health
+│  │                                        orders, age-verification, health,
+│  │                                        admin/{sync,login,markup}
+│  ├─ middleware.ts (src/)                  Session-Gate für /admin + /api/admin
 │  ├─ sitemap.ts  robots.ts
 │
 ├─ components/
@@ -90,8 +109,10 @@ src/
 │
 └─ lib/
    ├─ data/         Katalog: Marken, Geräte, Geschmäcker, abgeleitete Produkte
-   ├─ db/           Drizzle-Schema, Client, Seed, Compliance-Log
-   ├─ admin/        Lieferanten, Dropshipping-Routing, Preisregeln, Bestellungen
+   ├─ db/           Drizzle-Schema, Client, Seed, Bestellungen,
+   │                Compliance-Log, Preisregeln
+   ├─ admin/        Lieferanten, Dropshipping-Routing, Preisregeln,
+   │                Bestellungen, Session-Auth
    ├─ seo/          JSON-LD-Generatoren, pSEO-Templates und Routen-Enumeratoren
    ├─ compat.ts     Kompatibilitäts-Engine
    ├─ bundle.ts     Rabattstufen
@@ -189,7 +210,7 @@ das Maximum, das die DSGVO an dieser Stelle erlaubt.
 ## pSEO-Engine
 
 Drei Templates, 53 generierte Landingpages plus 178 Produktseiten und 34
-Index-/Kategorieseiten — insgesamt **265 statisch vorgerenderte Seiten**.
+Index-/Kategorieseiten — insgesamt **269 statisch vorgerenderte Seiten**.
 
 | Template | Muster | Seiten | Suchintention |
 |---|---|---|---|
@@ -254,9 +275,58 @@ größte Speicherposten im Stack — für eine A4-Seite Text. Für Stapelläufe
 (100 Scheine in einem Dokument) wäre das der richtige Zeitpunkt, `@react-pdf/renderer`
 in einem Worker zu ergänzen. Vorher nicht.
 
-> **Sicherheitshinweis:** `/admin` hat **keine eigene Authentifizierung**. In
-> Produktion schützt die Basic-Auth im Caddyfile die Route. `robots: noindex`
-> hält die Seite aus dem Index — es hält niemanden von der Seite fern.
+### Zugriffsschutz
+
+Zwei unabhängige Schichten, beide nötig:
+
+1. **Anwendungs-Session** (`src/middleware.ts`). Signiertes HttpOnly-Cookie,
+   HMAC-SHA256 über die Ablaufzeit, 12 Stunden gültig, Vergleich in konstanter
+   Zeit. Ohne gesetztes `ADMIN_SESSION_SECRET` bleibt das Panel gesperrt — die
+   Prüfung schlägt fehl *geschlossen*, nie offen. `/api/admin/*` antwortet mit
+   401 statt mit einem Redirect, den ein API-Client nicht befolgen kann.
+2. **Basic-Auth im Reverse Proxy** (`Caddyfile`). Verhindert, dass Next.js
+   überhaupt erreicht wird.
+
+Keine der beiden ersetzt die andere: Schicht 1 greift auch dann, wenn der Proxy
+falsch konfiguriert oder umgangen wird; Schicht 2 hält Traffic ab, bevor er die
+Anwendung kostet. `robots: noindex` hält die Seite aus dem Index — es hält
+niemanden von der Seite fern.
+
+Das Passwort liegt als SHA-256-Hex in `ADMIN_PASSWORD`, nicht im Klartext. Das
+ist kein Ersatz für eine langsame KDF: SHA-256 ist schnell genug, um ein
+schwaches Passwort offline durchzuprobieren. Deshalb ein generiertes Passwort
+verwenden, kein selbst ausgedachtes.
+
+---
+
+## Tests
+
+101 Tests über Vitest, alles reine Funktionen — kein DOM, Laufzeit unter einer
+Sekunde.
+
+| Datei | Deckt ab |
+|---|---|
+| `lib/data/devices.test.ts` | Slug-Round-Trip, Registry-Integrität, Routen-Enumeration |
+| `lib/compat.test.ts` | Nikotinempfehlung, Pod-Filterung über Gerätefamilien, Liquid-Abstufung |
+| `lib/bundle.test.ts` | Rabattstufen, Fortschritt, Cent-Arithmetik |
+| `lib/data/catalog.test.ts` | TPD2-Grenzen, Determinismus, EK-Leck-Schutz |
+| `lib/recommend.test.ts` | Taste-Finder-Scoring, Bestandsfilter, Payload-Sicherheit |
+| `lib/admin/pricing.test.ts` | Charm-Pricing, Preisuntergrenze, Aufschlag ≠ Marge |
+| `lib/admin/auth.test.ts` | Signaturprüfung, Ablauf, Fail-closed ohne Secret |
+
+Drei davon sind Regressionsgurte für Bugs, die beim Bauen tatsächlich
+aufgetreten sind:
+
+- **Der Slug-Round-Trip.** `String(1.0)` ist `"1"`, wodurch jede
+  1.0-Ohm-Kompatibilitätsseite gebaut wurde und dann 404 lieferte.
+- **Das EK-Leck.** `toPublic()` strippt `costCents`; der Test serialisiert den
+  kompletten Katalog und sucht nach dem Feld, statt nur ein Objekt zu prüfen.
+- **Aufschlag ≠ Marge.** +70 % Aufschlag sind 41 % Marge; der Test hält beide
+  Zahlen auseinander.
+
+Die Aussagekraft der Tests wurde per Mutation geprüft: der Slug-Fix und
+`toPublic()` wurden testweise zurückgedreht, die zuständigen Tests sind
+erwartungsgemäß rot geworden.
 
 ---
 
@@ -303,10 +373,17 @@ git clone <repo-url> vapebay && cd vapebay
 
 cp .env.example .env
 
-# Admin-Passwort-Hash erzeugen
-docker run --rm caddy:2-alpine caddy hash-password --plaintext 'einSicheresPasswort'
+# Schicht 1 — Anwendungs-Session
+openssl rand -hex 32                       # → ADMIN_SESSION_SECRET
+node -e "crypto.subtle.digest('SHA-256',new TextEncoder()\
+  .encode('einSicheresPasswort')).then(h=>console.log(\
+  Buffer.from(h).toString('hex')))"        # → ADMIN_PASSWORD
 
-nano .env    # SITE_DOMAIN, ACME_EMAIL, ADMIN_PASSWORD_HASH eintragen
+# Schicht 2 — Basic-Auth im Proxy
+docker run --rm caddy:2-alpine caddy hash-password \
+  --plaintext 'einSicheresPasswort'        # → ADMIN_PASSWORD_HASH
+
+nano .env    # SITE_DOMAIN, ACME_EMAIL und alle drei Admin-Werte eintragen
 
 docker compose up -d --build
 ```
@@ -329,7 +406,7 @@ docker compose ps                              # beide Dienste healthy
 curl -s https://vapebay.de/api/health | jq     # RSS unter 512 MB?
 docker stats --no-stream                       # tatsächlicher Verbrauch
 curl -sI https://vapebay.de | head -20         # HSTS, HTTP/2
-curl -s https://vapebay.de/sitemap.xml | head  # 265 URLs
+curl -s https://vapebay.de/sitemap.xml | head  # 252 URLs
 ```
 
 ### Betrieb
@@ -404,21 +481,28 @@ berührt Bestellungen, Compliance-Log und Lieferantendaten, nicht den Shop.
 Ehrliche Liste dessen, was für einen echten Produktivbetrieb ergänzt werden
 muss:
 
-- **Authentifizierung für `/admin`** über Session/Middleware statt nur
-  Basic-Auth im Reverse Proxy
 - **Echte Zahlungsanbindung.** Die Zahlungsauswahl ist UI; die Integration von
-  PayPal, Klarna, Stripe fehlt
-- **Echte Ident-Clients.** `POST /api/age-verification` simuliert Vertragsform
-  und Latenz von PostIdent/SOFORT Ident, ruft aber nichts auf
-- **Persistierte Bestellungen.** `POST /api/orders` rechnet korrekt und routet
-  korrekt, schreibt aber noch nicht in `orders`/`order_lines`
-- **Schreibende Admin-Aktionen.** Aufschlagregeln und pSEO-Templates werden
-  angezeigt und simuliert, aber noch nicht zurückgeschrieben
+  PayPal, Klarna, Stripe fehlt. Das ist die größte verbleibende Lücke.
+- **Echte Ident-Clients.** `POST /api/age-verification` bildet Vertragsform und
+  Latenz von PostIdent/SOFORT Ident ab, ruft aber nichts auf. Die echte
+  Integration ist asynchron (Webhook), der Endpunkt müsste dann 202 liefern.
+- **Lieferanten-Feeds.** SFTP- und REST-Sync sind simuliert. Die Parser-Strategie
+  (Musterabgleich statt Spaltenindex) ist dokumentiert, aber nicht implementiert.
+- **pSEO-Templates schreiben nicht zurück.** Prompts und Aktiv-Schalter werden
+  im UI bearbeitet, aber noch nicht in `pseo_templates` persistiert — anders als
+  die Aufschlagregeln, die das inzwischen tun.
+- **Preise werden beim Speichern einer Regel nicht neu abgeleitet.** Die Regel
+  landet in der Datenbank; die Neuberechnung des Katalogs müsste an den
+  Sync-Lauf gehängt werden.
+- **Ein einziger Admin-Account.** Bewusst so: eine Benutzertabelle für einen
+  Ein-Personen-Betrieb ist Maschinerie ohne Aufgabe. Beim zweiten Betreiber
+  gehört das durch echte Sessions ersetzt, nicht durch ein zweites Secret.
 - **Produktbilder.** `ProductVisual` erzeugt deterministische Silhouetten aus
-  dem Farbton des Produkts. Sobald der Lieferanten-Feed Assets liefert, wird
-  die Komponente gegen `next/image` getauscht — sonst ändert sich nichts
-- **Tests.** Kompatibilitäts-Engine, Bundle-Regeln und Preisableitung sind reine
-  Funktionen und damit die naheliegendsten Kandidaten für eine erste Suite
+  dem Farbton des Produkts. Sobald der Lieferanten-Feed Assets liefert, wird die
+  Komponente gegen `next/image` getauscht — sonst ändert sich nichts.
+- **Keine Komponententests.** Die reinen Funktionen sind abgedeckt; die
+  React-Komponenten sind es nicht. Die Flows wurden per Playwright manuell
+  verifiziert, aber nicht als Suite festgehalten.
 
 ---
 

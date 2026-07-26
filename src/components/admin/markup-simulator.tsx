@@ -1,19 +1,23 @@
 'use client';
 
 import * as React from 'react';
+import { useMutation } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { Save } from 'lucide-react';
 
 import { applyRule, type MarkupRule } from '@/lib/admin/pricing';
 import { formatEur } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
 import { Field, Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/misc';
 
 /**
  * Markup simulator.
  *
- * Read-only against the live rules — it computes what *would* happen, it does
- * not persist. Wiring "Speichern" to a mutation that rewrites `markup_rules`
- * and re-derives every product price is the one remaining step, and it should
- * run inside a transaction with an audit row per change.
+ * Saving writes to `markup_rules`; it does not reprice the live catalog,
+ * because prices are derived at build time. The button copy and the toast both
+ * say that outright — a merchant who thinks they just changed 178 live prices
+ * when they did not is worse off than one who has to run a sync.
  */
 export function MarkupSimulator({ rules }: { rules: MarkupRule[] }) {
   const [kind, setKind] = React.useState(rules[0]?.kind ?? 'nicsalt');
@@ -37,6 +41,28 @@ export function MarkupSimulator({ rules }: { rules: MarkupRule[] }) {
 
   const currentRetail = applyRule(costCents, base);
   const deltaCents = retailCents - currentRetail;
+  const dirty = bps !== base.markupBps || charm !== base.charmPricing;
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/admin/markup', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productKind: kind,
+          markupBps: bps,
+          floorCents: base.floorCents,
+          charmPricing: charm,
+          active: base.active,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? 'Speichern fehlgeschlagen');
+      return data as { note: string };
+    },
+    onSuccess: (data) => toast.success('Regel gespeichert', { description: data.note }),
+    onError: (error: Error) => toast.error('Nicht gespeichert', { description: error.message }),
+  });
 
   return (
     <div className="glass grid gap-6 rounded-lg p-5 lg:grid-cols-[1fr_1fr]">
@@ -143,6 +169,22 @@ export function MarkupSimulator({ rules }: { rules: MarkupRule[] }) {
             erzeugen.
           </p>
         )}
+
+        <Button
+          size="sm"
+          className="mt-5 w-full"
+          disabled={!dirty || retailCents <= costCents}
+          loading={save.isPending}
+          onClick={() => save.mutate()}
+        >
+          {!save.isPending && <Save className="size-4" aria-hidden />}
+          Regel speichern
+        </Button>
+        <p className="mt-2 text-2xs leading-relaxed text-fg-subtle">
+          Speichern schreibt die Regel in die Datenbank. Die Verkaufspreise werden beim nächsten
+          Lieferanten-Sync oder Build daraus neu abgeleitet — bestehende Preise ändern sich nicht
+          sofort.
+        </p>
       </div>
     </div>
   );

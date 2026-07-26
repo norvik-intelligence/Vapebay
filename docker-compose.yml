@@ -20,6 +20,10 @@ services:
       DATABASE_URL: /app/data/vapebay.db
       NEXT_PUBLIC_SITE_URL: ${SITE_URL:-https://vapebay.de}
       NEXT_TELEMETRY_DISABLED: "1"
+      # Application-level admin gate (src/middleware.ts). Without these the
+      # panel stays locked — the container starts, /admin does not open.
+      ADMIN_SESSION_SECRET: ${ADMIN_SESSION_SECRET:?ADMIN_SESSION_SECRET muss gesetzt sein}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD (SHA-256-Hex) muss gesetzt sein}
     volumes:
       # Named volume, not a bind mount: SQLite over a bind-mounted host path on
       # some overlay filesystems breaks WAL locking. A Docker volume is a plain

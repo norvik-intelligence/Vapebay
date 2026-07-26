@@ -1,4 +1,5 @@
-import { PRODUCTS } from '@/lib/data/catalog';
+import { PRODUCTS, productById } from '@/lib/data/catalog';
+import { listOrders } from '@/lib/db/orders';
 import { routeOrder, type RoutingResult } from './dropshipping';
 
 /**
@@ -106,13 +107,54 @@ export function orderRouting(order: AdminOrder): RoutingResult {
   );
 }
 
+/**
+ * Real orders first, demo orders behind them.
+ *
+ * The demo rows exist so the admin screens are legible on a fresh install; a
+ * dashboard that renders four empty tables teaches a merchant nothing. Once
+ * real orders arrive they lead the queue, and `isDemo` lets the UI label the
+ * rest honestly rather than passing fixtures off as trade.
+ */
+export function allOrders(): (AdminOrder & { isDemo: boolean })[] {
+  const stored: (AdminOrder & { isDemo: boolean })[] = listOrders().map((order) => ({
+    id: order.id,
+    placedAt: order.placedAt,
+    customer: {
+      name: order.customerName,
+      postcode: order.postcode,
+      city: order.city,
+      country: order.country,
+    },
+    email: order.email,
+    status: order.status,
+    paymentMethod: order.paymentMethod,
+    identReference: order.identReference,
+    isBusiness: order.isBusiness,
+    lines: order.lines.map((line) => ({
+      productId: line.productId,
+      name: line.productName,
+      // Brand is needed for supplier routing and is not stored on the line —
+      // resolve it from the catalog, falling back to the first supplier's
+      // coverage rather than dropping the position silently.
+      brandSlug: productById(line.productId)?.brandSlug ?? 'unbekannt',
+      qty: line.qty,
+      unitCents: line.unitCents,
+      unitCostCents: line.unitCostCents,
+    })),
+    isDemo: false,
+  }));
+
+  return [...stored, ...ADMIN_ORDERS.map((order) => ({ ...order, isDemo: true }))];
+}
+
 export function orderById(id: string) {
-  return ADMIN_ORDERS.find((order) => order.id === id);
+  return allOrders().find((order) => order.id === id);
 }
 
 /** Aggregate KPIs for the dashboard header. */
 export function dashboardKpis() {
-  const totals = ADMIN_ORDERS.map(orderTotals);
+  const all = allOrders();
+  const totals = all.map(orderTotals);
   const revenue = totals.reduce((sum, t) => sum + t.subtotalCents, 0);
   const margin = totals.reduce((sum, t) => sum + t.marginCents, 0);
   const lowStock = PRODUCTS.filter((p) => p.stock > 0 && p.stock <= 12).length;
@@ -122,9 +164,10 @@ export function dashboardKpis() {
     revenueCents: revenue,
     marginCents: margin,
     marginPct: revenue === 0 ? 0 : (margin / revenue) * 100,
-    orderCount: ADMIN_ORDERS.length,
-    averageOrderCents: Math.round(revenue / ADMIN_ORDERS.length),
-    openOrders: ADMIN_ORDERS.filter((o) => o.status === 'paid' || o.status === 'pending').length,
+    orderCount: all.length,
+    averageOrderCents: all.length === 0 ? 0 : Math.round(revenue / all.length),
+    openOrders: all.filter((o) => o.status === 'paid' || o.status === 'pending').length,
+    realOrderCount: all.filter((o) => !o.isDemo).length,
     skuCount: PRODUCTS.length,
     lowStock,
     outOfStock,

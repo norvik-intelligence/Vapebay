@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { AlertTriangle, ArrowRight, PackageSearch, RefreshCw } from 'lucide-react';
 
-import { ADMIN_ORDERS, dashboardKpis, orderRouting, orderTotals } from '@/lib/admin/orders';
+import { allOrders, dashboardKpis, orderRouting, orderTotals } from '@/lib/admin/orders';
 import { SUPPLIERS } from '@/lib/admin/suppliers';
 import { totalPseoRoutes, PSEO_TEMPLATES } from '@/lib/seo/pseo';
 import { listVerifications } from '@/lib/db/compliance';
@@ -20,7 +20,8 @@ export default function AdminDashboard() {
   const kpi = dashboardKpis();
   const failedSyncs = SUPPLIERS.filter((s) => s.lastSyncStatus === 'failed');
   const verifications = listVerifications(5);
-  const recent = ADMIN_ORDERS.slice(0, 6);
+  const orders = allOrders();
+  const recent = orders.slice(0, 6);
 
   const criticalStock = PRODUCTS.filter((p) => stockLevel(p.stock) !== 'in_stock')
     .sort((a, b) => a.stock - b.stock)
@@ -64,7 +65,7 @@ export default function AdminDashboard() {
         <StatTile
           label="Umsatz"
           value={formatEur(kpi.revenueCents)}
-          sub={`${kpi.orderCount} Bestellungen`}
+          sub={`${kpi.orderCount} Bestellungen · ${kpi.realOrderCount} echt`}
         />
         <StatTile
           label="Deckungsbeitrag"
@@ -271,7 +272,7 @@ export default function AdminDashboard() {
         }
       >
         <ul className="divide-y divide-line">
-          {ADMIN_ORDERS.filter((o) => o.status === 'paid').map((order) => {
+          {orders.filter((o) => o.status === 'paid').map((order) => {
             const routing = orderRouting(order);
             return (
               <li key={order.id} className="flex flex-wrap items-center gap-4 px-5 py-3">

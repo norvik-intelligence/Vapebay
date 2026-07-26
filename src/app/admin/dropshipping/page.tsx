@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { AlertTriangle, PackageSearch, Truck } from 'lucide-react';
 
-import { ADMIN_ORDERS, orderRouting, orderTotals } from '@/lib/admin/orders';
+import { allOrders, orderRouting, orderTotals } from '@/lib/admin/orders';
 import { SENDER } from '@/lib/admin/dropshipping';
 import { SUPPLIERS } from '@/lib/admin/suppliers';
 import { formatEur } from '@/lib/utils';
@@ -10,8 +10,12 @@ import { PackingSlipDialog } from '@/components/admin/packing-slip';
 
 export const metadata: Metadata = { title: 'Blind-Dropshipping' };
 
+// The routing queue reads live orders. Without this the page is prerendered at
+// build time and silently keeps showing the demo fixtures forever.
+export const dynamic = 'force-dynamic';
+
 export default function DropshippingPage() {
-  const routings = ADMIN_ORDERS.map((order) => ({
+  const routings = allOrders().map((order) => ({
     order,
     routing: orderRouting(order),
     totals: orderTotals(order),
@@ -90,6 +94,11 @@ export default function DropshippingPage() {
               {order.isBusiness && (
                 <span className="rounded-sm border border-line bg-white/[0.04] px-2 py-0.5 text-2xs text-fg-muted">
                   B2B
+                </span>
+              )}
+              {order.isDemo && (
+                <span className="rounded-sm border border-line bg-white/[0.04] px-2 py-0.5 text-2xs text-fg-subtle">
+                  Demo
                 </span>
               )}
               <span className="text-xs text-fg-muted">
