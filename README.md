@@ -61,6 +61,7 @@ npm run build        # Produktionsbuild, generiert 269 statische Seiten
 npm run typecheck    # tsc --noEmit
 npm run test         # Vitest, 101 Tests
 npm run test:coverage
+npm run test:e2e     # Playwright, 15 Flows (erst `npm run build` ausführen)
 npm run db:studio    # Drizzle Studio
 npm run db:reset     # DB löschen, neu anlegen, neu seeden
 ```
@@ -328,6 +329,33 @@ Die Aussagekraft der Tests wurde per Mutation geprüft: der Slug-Fix und
 `toPublic()` wurden testweise zurückgedreht, die zuständigen Tests sind
 erwartungsgemäß rot geworden.
 
+### E2E-Suite (Playwright)
+
+15 Flows unter `e2e/` gegen den echten Produktions-Build, mit eigener frisch
+aufgesetzter Datenbank pro Lauf (`data/e2e.db`) — Testbestellungen landen nie
+in der Entwicklungs-DB. `npm run build` muss vorher gelaufen sein; die Suite
+baut absichtlich nicht selbst.
+
+Abgedeckt: Age Gate (blockiert, merkt sich die Bestätigung), Kompatibilitäts-
+Finder inklusive Einweg-Antwort und 1.0-Ohm-Slug-Regression, die komplette
+Kaufstrecke vom Taste Finder bis zur Bestellbestätigung, die Abweisung
+Minderjähriger auf **beiden** Ebenen (Formular-Validierung und Server), das
+Admin-Session-Gate (Redirect, 401 für die API, Open-Redirect-Schutz,
+Login/Logout) und die Schreibpfade — Margen-Regel und pSEO-Prompt überleben
+einen Reload, eine per API angelegte Bestellung erscheint in der
+Dropshipping-Queue.
+
+Zwei Erkenntnisse aus dem Einrichten der Suite, beide im Code gelandet:
+
+- Der Age Gate lag als modaler Dialog auch über `/admin/login` und versteckte
+  das Login-Formular aus dem Accessibility-Tree — der Betreiber hätte sich auf
+  einem frischen Gerät nicht anmelden können. Der Gate rendert jetzt nicht
+  mehr auf Admin-Routen.
+- Die Formular-Fehlermeldung unter dem Geburtsdatum verschiebt beim Einfügen
+  das Layout; ein Klick im selben Moment landet auf den alten Koordinaten.
+  Der Test blurt deshalb explizit und wartet die Meldung ab — und prüft damit
+  nebenbei beide Abwehrschichten einzeln.
+
 ---
 
 ## Deployment auf Hetzner CX23
@@ -488,9 +516,6 @@ muss:
   Integration ist asynchron (Webhook), der Endpunkt müsste dann 202 liefern.
 - **Lieferanten-Feeds.** SFTP- und REST-Sync sind simuliert. Die Parser-Strategie
   (Musterabgleich statt Spaltenindex) ist dokumentiert, aber nicht implementiert.
-- **pSEO-Templates schreiben nicht zurück.** Prompts und Aktiv-Schalter werden
-  im UI bearbeitet, aber noch nicht in `pseo_templates` persistiert — anders als
-  die Aufschlagregeln, die das inzwischen tun.
 - **Preise werden beim Speichern einer Regel nicht neu abgeleitet.** Die Regel
   landet in der Datenbank; die Neuberechnung des Katalogs müsste an den
   Sync-Lauf gehängt werden.
@@ -500,9 +525,10 @@ muss:
 - **Produktbilder.** `ProductVisual` erzeugt deterministische Silhouetten aus
   dem Farbton des Produkts. Sobald der Lieferanten-Feed Assets liefert, wird die
   Komponente gegen `next/image` getauscht — sonst ändert sich nichts.
-- **Keine Komponententests.** Die reinen Funktionen sind abgedeckt; die
-  React-Komponenten sind es nicht. Die Flows wurden per Playwright manuell
-  verifiziert, aber nicht als Suite festgehalten.
+- **Keine Komponententests auf React-Ebene.** Die reinen Funktionen (Vitest)
+  und die Nutzer-Flows (Playwright) sind abgedeckt; isolierte Komponententests
+  mit Testing Library fehlen. Bewusst nachrangig: die E2E-Suite prüft dieselben
+  Komponenten im echten Zusammenspiel.
 
 ---
 

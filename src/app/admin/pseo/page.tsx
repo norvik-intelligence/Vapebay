@@ -2,15 +2,21 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ExternalLink, Globe } from 'lucide-react';
 
-import { PSEO_TEMPLATES, totalPseoRoutes } from '@/lib/seo/pseo';
+import { totalPseoRoutes } from '@/lib/seo/pseo';
+import { loadPseoTemplates } from '@/lib/db/pseo';
 import { PRODUCTS } from '@/lib/data/catalog';
 import { AdminHeader, Panel, StatTile } from '@/components/admin/primitives';
 import { PseoTemplateCard } from '@/components/admin/pseo-template-card';
 
 export const metadata: Metadata = { title: 'pSEO-Manager' };
 
+// Templates carry DB overrides (prompt, enabled) — read them per request so a
+// save in one tab is visible in the next, not after the next build.
+export const dynamic = 'force-dynamic';
+
 export default function PseoPage() {
-  const active = PSEO_TEMPLATES.filter((t) => t.enabled);
+  const templates = loadPseoTemplates();
+  const active = templates.filter((t) => t.enabled);
   const totalRoutes = totalPseoRoutes();
 
   return (
@@ -22,7 +28,7 @@ export default function PseoPage() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile label="Generierte Seiten" value={String(totalRoutes)} sub="statisch vorgerendert" tone="accent" />
-        <StatTile label="Aktive Templates" value={`${active.length} / ${PSEO_TEMPLATES.length}`} />
+        <StatTile label="Aktive Templates" value={`${active.length} / ${templates.length}`} />
         <StatTile label="Produktseiten" value={String(PRODUCTS.length)} sub="mit Product-JSON-LD" />
         <StatTile
           label="Seiten mit FAQ-Schema"
@@ -35,7 +41,7 @@ export default function PseoPage() {
         <h2 id="templates-title" className="text-lg font-semibold tracking-tight">
           Templates
         </h2>
-        {PSEO_TEMPLATES.map((template) => (
+        {templates.map((template) => (
           <PseoTemplateCard
             key={template.id}
             template={{

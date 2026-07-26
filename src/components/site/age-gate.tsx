@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { usePathname } from 'next/navigation';
 import { ShieldCheck, CalendarDays, ExternalLink } from 'lucide-react';
 
 import { useCart } from '@/lib/store/cart';
@@ -17,6 +18,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
  * *delivery*, not at the point of browsing.
  */
 export function AgeGate() {
+  const pathname = usePathname();
   const verified = useCart((s) => s.ageVerified);
   const setVerified = useCart((s) => s.setAgeVerified);
   const [hydrated, setHydrated] = React.useState(false);
@@ -29,7 +31,10 @@ export function AgeGate() {
     return unsub;
   }, []);
 
-  const open = hydrated && !verified;
+  // The gate protects shoppers from age-restricted *products*. The admin
+  // backend shows none — and as a Radix modal the gate would aria-hide the
+  // login form underneath it, locking the operator out of their own panel.
+  const open = hydrated && !verified && !pathname.startsWith('/admin');
 
   return (
     <Dialog open={open}>

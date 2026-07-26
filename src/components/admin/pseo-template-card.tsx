@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
+import { useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ExternalLink, RotateCcw, Save, Sparkles } from 'lucide-react';
 
@@ -24,17 +25,41 @@ export interface PseoTemplateView {
 /**
  * Template editor.
  *
- * Local state only: toggling a template off here does not un-build the pages —
- * they are statically generated, so the toggle takes effect on the next build
- * (`enabled` gates `generateStaticParams`). The copy says so explicitly rather
- * than letting a merchant believe they just deindexed 17 pages.
+ * Saving persists to `pseo_templates`. Toggling a template off does not
+ * un-build its pages — they are statically generated, so the switch takes
+ * effect on the next build. The copy says so explicitly rather than letting a
+ * merchant believe they just deindexed 17 pages.
  */
 export function PseoTemplateCard({ template }: { template: PseoTemplateView }) {
   const [enabled, setEnabled] = React.useState(template.enabled);
   const [prompt, setPrompt] = React.useState(template.enrichmentPrompt);
-  const dirty = prompt !== template.enrichmentPrompt || enabled !== template.enabled;
+  // Track the last persisted values, not the initial props, so a successful
+  // save clears the dirty flag without a page reload.
+  const [saved, setSaved] = React.useState({
+    prompt: template.enrichmentPrompt,
+    enabled: template.enabled,
+  });
+  const dirty = prompt !== saved.prompt || enabled !== saved.enabled;
 
   const variables = [...prompt.matchAll(/\{\{(\w+)\}\}/g)].map((match) => match[1]);
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/admin/pseo', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: template.id, enrichmentPrompt: prompt, enabled }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? 'Speichern fehlgeschlagen');
+      return data as { note: string };
+    },
+    onSuccess: (data) => {
+      setSaved({ prompt, enabled });
+      toast.success('Template gespeichert', { description: data.note });
+    },
+    onError: (error: Error) => toast.error('Nicht gespeichert', { description: error.message }),
+  });
 
   return (
     <article className={cn('glass rounded-lg', !enabled && 'opacity-70')}>
@@ -113,26 +138,17 @@ export function PseoTemplateCard({ template }: { template: PseoTemplateView }) {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <Button
-            size="sm"
-            disabled={!dirty}
-            onClick={() =>
-              toast.success('Template gespeichert', {
-                description:
-                  'Die Änderung greift beim nächsten Build — die bestehenden Seiten bleiben bis dahin unverändert online.',
-              })
-            }
-          >
-            <Save className="size-4" aria-hidden />
+          <Button size="sm" disabled={!dirty} loading={save.isPending} onClick={() => save.mutate()}>
+            {!save.isPending && <Save className="size-4" aria-hidden />}
             Speichern
           </Button>
           <Button
             size="sm"
             variant="ghost"
-            disabled={!dirty}
+            disabled={!dirty || save.isPending}
             onClick={() => {
-              setPrompt(template.enrichmentPrompt);
-              setEnabled(template.enabled);
+              setPrompt(saved.prompt);
+              setEnabled(saved.enabled);
             }}
           >
             <RotateCcw className="size-4" aria-hidden />
