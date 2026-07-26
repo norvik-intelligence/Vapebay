@@ -1,0 +1,97 @@
+# Vapebay — production stack for a Hetzner CX23 (2 vCPU / 4 GB / 40 GB, ~€10/mo).
+#
+# Two containers, no database server. SQLite in a bind-mounted volume handles a
+# 178-SKU catalog comfortably; adding Postgres would consume ~250MB RSS for a
+# workload that fits in a 12MB file. See README "Skalierung" for the migration
+# path once write concurrency actually becomes the bottleneck.
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vapebay/web:latest
+    container_name: vapebay-web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+      DATABASE_URL: /app/data/vapebay.db
+      NEXT_PUBLIC_SITE_URL: ${SITE_URL:-https://vapebay.de}
+      NEXT_TELEMETRY_DISABLED: "1"
+    volumes:
+      # Named volume, not a bind mount: SQLite over a bind-mounted host path on
+      # some overlay filesystems breaks WAL locking. A Docker volume is a plain
+      # ext4 directory and behaves correctly.
+      - vapebay-data:/app/data
+    networks:
+      - vapebay
+    deploy:
+      resources:
+        limits:
+          # The brief's 512MB cap. Node is started with --max-old-space-size=384
+          # so V8 begins collecting before the cgroup OOM killer intervenes —
+          # without that headroom the container is killed instead of GC'ing.
+          memory: 512M
+          cpus: "1.5"
+        reservations:
+          memory: 192M
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 4s
+      retries: 3
+      start_period: 25s
+    logging:
+      driver: json-file
+      options:
+        # Unbounded JSON logs are the classic way a 40GB VPS fills up silently.
+        max-size: "10m"
+        max-file: "3"
+    security_opt:
+      - no-new-privileges:true
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: vapebay-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:-vapebay.de}
+      ACME_EMAIL: ${ACME_EMAIL:-admin@vapebay.de}
+      # htpasswd hash guarding /admin. Generate with:
+      #   docker run --rm caddy:2-alpine caddy hash-password --plaintext 'yourpass'
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:?ADMIN_PASSWORD_HASH muss gesetzt sein}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data # ACME certificates — losing this re-issues on restart
+      - caddy-config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+    networks:
+      - vapebay
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.5"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  vapebay:
+    driver: bridge
+
+volumes:
+  vapebay-data:
+  caddy-data:
+  caddy-config:

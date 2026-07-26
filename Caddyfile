@@ -1,0 +1,76 @@
+# Caddy handles TLS, compression and static-asset caching.
+# Certificates are issued and renewed automatically via ACME — no certbot,
+# no cron job, no renewal that silently expires on a Sunday.
+
+{
+	email {$ACME_EMAIL}
+	# Uncomment while testing to avoid hitting Let's Encrypt rate limits:
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+	servers {
+		protocols h1 h2 h3
+	}
+}
+
+{$SITE_DOMAIN}, www.{$SITE_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "geolocation=(), microphone=(), camera=(), interest-cohort=()"
+		# Age-restricted retail: keep the listings out of shopping surfaces that
+		# do not enforce an age gate.
+		X-Robots-Tag "index, follow, max-image-preview:large"
+		-Server
+	}
+
+	# Redirect the www variant to the apex so the pSEO pages never split their
+	# ranking signals across two hostnames.
+	@www host www.{$SITE_DOMAIN}
+	redir @www https://{$SITE_DOMAIN}{uri} permanent
+
+	# Next.js content-hashes everything under /_next/static — immutable is safe
+	# and removes a revalidation round-trip per asset.
+	@immutable path /_next/static/* /fonts/* /icons/*
+	header @immutable Cache-Control "public, max-age=31536000, immutable"
+
+	# The admin panel ships without authentication (see src/app/admin/layout.tsx).
+	# This block is what actually keeps it private in production.
+	@admin path /admin /admin/*
+	basic_auth @admin {
+		{$ADMIN_USER} {$ADMIN_PASSWORD_HASH}
+	}
+
+	# Cheap abuse brake on the write endpoints. Caddy's built-in limiter is
+	# per-connection; for real rate limiting add the caddy-ratelimit plugin.
+	@writes {
+		method POST
+		path /api/*
+	}
+	request_body @writes {
+		max_size 64KB
+	}
+
+	reverse_proxy web:3000 {
+		health_uri /api/health
+		health_interval 30s
+		health_timeout 4s
+
+		# Without this the app sees Caddy's container IP as the client address,
+		# which breaks any downstream geo or rate-limit logic.
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	log {
+		output file /data/access.log {
+			roll_size 10MB
+			roll_keep 3
+		}
+		format json
+		# Healthchecks would otherwise be ~2900 log lines a day of pure noise.
+		level ERROR
+	}
+}

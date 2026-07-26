@@ -1,0 +1,14 @@
+node_modules
+.next
+.git
+.github
+data
+*.db
+*.db-shm
+*.db-wal
+.env
+.env.local
+*.log
+README.md
+.vscode
+.idea
