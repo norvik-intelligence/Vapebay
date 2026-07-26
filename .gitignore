@@ -9,8 +9,11 @@ dist/
 .env.local
 .env*.local
 
-# SQLite database + WAL sidecar files
-data/
+# SQLite database + WAL sidecar files.
+# Führender Slash ist zwingend: `data/` ohne ihn matcht JEDES Verzeichnis
+# namens data an beliebiger Tiefe — und hat den kompletten Katalog-Layer unter
+# src/lib/data/ aus dem Repository ausgeschlossen.
+/data/
 *.db
 *.db-shm
 *.db-wal
